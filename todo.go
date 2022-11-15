@@ -2,12 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"net/http"
-	"strconv"
-
-	"github.com/gorilla/mux"
 )
 
 type Todo struct {
@@ -17,39 +11,20 @@ type Todo struct {
 }
 
 type GetRequest struct {
-	ID int
-}
-
-func (x GetRequest) Bind(r *http.Request) (GetRequest, error) {
-	str, ok := mux.Vars(r)["id"]
-	if !ok {
-		return x, errors.New("missing todo id")
-	}
-
-	id, err := strconv.Atoi(str)
-	if err != nil {
-		return x, errors.New("invalid todo id")
-	}
-
-	x.ID = id
-	return x, nil
+	ID int `route_var:"id"`
 }
 
 type GetResponse struct {
 	Todo
 }
 
-type ListRequest struct {
-	NoOpBinder[ListRequest]
-}
+type ListRequest struct{}
 
 type ListResponse struct {
 	Data []Todo `json:"data"`
 }
 
 type CreateRequest struct {
-	JsonBinder[CreateRequest]
-
 	Title       string `json:"title"`
 	Description string `json:"description"`
 }
@@ -59,50 +34,15 @@ type CreateResponse struct {
 }
 
 type UpdateRequest struct {
-	ID          int
+	ID          int    `route_var:"id"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
-}
-
-func (x UpdateRequest) Bind(r *http.Request) (UpdateRequest, error) {
-	str, ok := mux.Vars(r)["id"]
-	if !ok {
-		return x, errors.New("missing todo id")
-	}
-
-	id, err := strconv.Atoi(str)
-	if err != nil {
-		return x, errors.New("invalid todo id")
-	}
-
-	err = json.NewDecoder(r.Body).Decode(&x)
-	if err != nil {
-		return x, err
-	}
-
-	x.ID = id
-	return x, nil
 }
 
 type UpdateResponse struct{}
 
 type DeleteRequest struct {
-	ID int
-}
-
-func (x DeleteRequest) Bind(r *http.Request) (DeleteRequest, error) {
-	str, ok := mux.Vars(r)["id"]
-	if !ok {
-		return x, errors.New("missing todo id")
-	}
-
-	id, err := strconv.Atoi(str)
-	if err != nil {
-		return x, errors.New("invalid todo id")
-	}
-
-	x.ID = id
-	return x, nil
+	ID int `route_var:"id"`
 }
 
 type DeleteResponse struct{}
@@ -195,5 +135,5 @@ func DeleteTodo(ctx context.Context, req *DeleteRequest) (*DeleteResponse, error
 	if err != nil {
 		return nil, err
 	}
-	return nil, nil
+	return &DeleteResponse{}, nil
 }
