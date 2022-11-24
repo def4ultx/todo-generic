@@ -1,18 +1,20 @@
 package main
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"reflect"
 	"strconv"
+	"sync"
 
 	"github.com/gorilla/mux"
 )
 
 type (
-	ctxKeyHttpRequest   struct{}
-	ctxKeyRequestHeader struct{}
+	ctxKeyHttpRequest struct{}
 )
 
 type Handler[T, V any] func(ctx context.Context, t *T) (*V, error)
@@ -40,7 +42,6 @@ func Handle[T, V any](h Handler[T, V]) http.HandlerFunc {
 		}
 
 		ctx := r.Context()
-		ctx = context.WithValue(ctx, ctxKeyRequestHeader{}, r.Header)
 		ctx = context.WithValue(ctx, ctxKeyHttpRequest{}, r)
 		resp, err := h(ctx, &req)
 		if err != nil {
@@ -52,9 +53,19 @@ func Handle[T, V any](h Handler[T, V]) http.HandlerFunc {
 	}
 }
 
-func SetStructValue(r *http.Request, t any) error {
-	fields := reflect.TypeOf(t).Elem()
+func SetStructValue(r *http.Request, t any) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if e, ok := r.(error); ok {
+				err = e
+			}
+		}
+	}()
 	values := reflect.ValueOf(t)
+	if values.Kind() != reflect.Pointer {
+		return errors.New("not a pointer to struct")
+	}
+	fields := reflect.TypeOf(t).Elem()
 
 	num := fields.NumField()
 	for i := 0; i < num; i++ {
@@ -62,12 +73,12 @@ func SetStructValue(r *http.Request, t any) error {
 		field := fields.Field(i)
 		value := values.Elem().Field(i)
 
-		val, ok := GetFieldValueFromTag(r, field)
+		val, ok := GetRequestValueFromTag(r, field)
 		if !ok || val == "" {
 			continue
 		}
 
-		err := SetFieldValue(value, val)
+		err = SetFieldValue(value, val)
 		if err != nil {
 			return err
 		}
@@ -111,7 +122,7 @@ func SetFieldValue(value reflect.Value, val string) error {
 	return nil
 }
 
-func GetFieldValueFromTag(r *http.Request, field reflect.StructField) (string, bool) {
+func GetRequestValueFromTag(r *http.Request, field reflect.StructField) (string, bool) {
 	var (
 		tag string
 		ok  bool
@@ -147,8 +158,20 @@ func WriteErrorResponse(w http.ResponseWriter, code int, err error) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+var zwPool = sync.Pool{
+	New: func() any {
+		return gzip.NewWriter(nil)
+	},
+}
+
 func WriteResponse(w http.ResponseWriter, code int, v interface{}) {
+	zw := zwPool.Get().(*gzip.Writer)
+	defer zwPool.Put(zw)
+	defer zw.Close()
+	zw.Reset(w)
+
 	w.Header().Add("Content-Type", "application/json")
+	w.Header().Add("Content-Encoding", "gzip")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(v)
+	json.NewEncoder(zw).Encode(v)
 }
